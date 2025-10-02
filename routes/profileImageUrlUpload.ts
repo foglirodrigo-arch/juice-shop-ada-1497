@@ -25,20 +25,38 @@ export function profileImageUrlUpload () {
         'cdn.example.net'
         // add more permitted image hostnames as needed
       ]
-      let parsedHostname
+      let parsedUrl
       try {
-        parsedHostname = new URL(url).hostname
+        parsedUrl = new URL(url)
       } catch (e) {
         next(new Error('Invalid imageUrl parameter'))
         return
       }
+      // SSRF defense: Only allow http/https schemes
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        next(new Error('Unsupported URL protocol'))
+        return
+      }
+      // SSRF defense: Only allow ports 80 (http), 443 (https), or default ('')
+      const port = parsedUrl.port || (parsedUrl.protocol === 'http:' ? '80' : (parsedUrl.protocol === 'https:' ? '443' : ''))
+      if (port !== '' && port !== '80' && port !== '443') {
+        next(new Error('Unsupported port for imageUrl'))
+        return
+      }
+      // SSRF defense: Block any direct IP addresses
+      const isIPv4 = /^[0-9\.]+$/.test(parsedUrl.hostname)
+      const isIPv6 = /^\[[a-fA-F0-9:]+\]$/.test(parsedUrl.hostname)
+      if (isIPv4 || isIPv6) {
+        next(new Error('Direct IP addresses are not allowed for imageUrl'))
+        return
+      }
       if (loggedInUser) {
-        if (!allowedHostnames.includes(parsedHostname)) {
+        if (!allowedHostnames.includes(parsedUrl.hostname)) {
           next(new Error('Unauthorized image hosting provider'))
           return
         }
         try {
-          const response = await fetch(url)
+          const response = await fetch(parsedUrl.toString())
           if (!response.ok || !response.body) {
             throw new Error('url returned a non-OK status code or an empty body')
           }
